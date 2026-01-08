@@ -1,93 +1,134 @@
 """
-Fetch historical weather data for NYC from Open-Meteo API
-Date range: 2023-01-01 to present
-Location: NYC (Central Park coordinates)
+Fetch historical weather data for NYC from Open-Meteo API.
+
+This script retrieves daily weather data including temperature, precipitation,
+and snowfall for New York City to use in congestion prediction modeling.
+
+Usage:
+    python scripts/fetch_weather_data.py
 """
 
-import requests
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
 import pandas as pd
-from datetime import datetime, timedelta
+import requests
 
-# NYC coordinates (Central Park)
-LATITUDE = 40.7829
-LONGITUDE = -73.9654
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Date range (your data is 2023-present)
-START_DATE = "2023-01-01"
-END_DATE = datetime.now().strftime("%Y-%m-%d")
+from src.config import (
+    NYC_LATITUDE,
+    NYC_LONGITUDE,
+    WEATHER_API_URL,
+    WEATHER_DATA_FILE,
+)
+from src.utils import setup_logging, print_header
 
-print("="*60)
-print("FETCHING NYC WEATHER DATA")
-print("="*60)
-print(f"Location: NYC (Central Park)")
-print(f"Coordinates: {LATITUDE}, {LONGITUDE}")
-print(f"Date range: {START_DATE} to {END_DATE}")
-print()
+# Setup logging
+logger = setup_logging("weather_fetch")
 
-# Open-Meteo API endpoint
-url = "https://archive-api.open-meteo.com/v1/archive"
 
-# Parameters
-params = {
-    "latitude": LATITUDE,
-    "longitude": LONGITUDE,
-    "start_date": START_DATE,
-    "end_date": END_DATE,
-    "daily": [
-        "temperature_2m_max",      # Daily high temp
-        "temperature_2m_min",      # Daily low temp  
-        "precipitation_sum",       # Total precipitation
-        "snowfall_sum",           # Total snowfall
-        "precipitation_hours"      # Hours of precipitation
-    ],
-    "temperature_unit": "fahrenheit",
-    "precipitation_unit": "inch",
-    "timezone": "America/New_York"
-}
-
-print("Fetching weather data from Open-Meteo API...")
-response = requests.get(url, params=params)
-
-if response.status_code == 200:
-    print("✓ Successfully fetched weather data!")
+def fetch_weather_data(
+    start_date: str = "2023-01-01",
+    end_date: Optional[str] = None
+) -> pd.DataFrame:
+    """
+    Fetch historical weather data from Open-Meteo API.
     
-    # Parse JSON response
+    Args:
+        start_date: Start date in YYYY-MM-DD format.
+        end_date: End date in YYYY-MM-DD format. Defaults to today.
+        
+    Returns:
+        DataFrame with daily weather data.
+        
+    Raises:
+        requests.RequestException: If API request fails.
+        ValueError: If API returns invalid data.
+    """
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    
+    logger.info(f"Fetching weather data from {start_date} to {end_date}")
+    logger.info(f"Location: NYC ({NYC_LATITUDE}, {NYC_LONGITUDE})")
+    
+    params = {
+        "latitude": NYC_LATITUDE,
+        "longitude": NYC_LONGITUDE,
+        "start_date": start_date,
+        "end_date": end_date,
+        "daily": [
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_sum",
+            "snowfall_sum",
+            "precipitation_hours"
+        ],
+        "temperature_unit": "fahrenheit",
+        "precipitation_unit": "inch",
+        "timezone": "America/New_York"
+    }
+    
+    try:
+        response = requests.get(WEATHER_API_URL, params=params, timeout=30)
+        response.raise_for_status()
+    except requests.Timeout:
+        logger.error("API request timed out after 30 seconds")
+        raise
+    except requests.RequestException as e:
+        logger.error(f"API request failed: {e}")
+        raise
+    
     data = response.json()
     
-    # Extract daily data
-    daily = data['daily']
+    if "daily" not in data:
+        raise ValueError("API response missing 'daily' data")
     
-    # Create DataFrame
+    daily = data["daily"]
+    
     weather_df = pd.DataFrame({
-        'date': daily['time'],
-        'temp_high': daily['temperature_2m_max'],
-        'temp_low': daily['temperature_2m_min'],
-        'precipitation': daily['precipitation_sum'],
-        'snowfall': daily['snowfall_sum'],
-        'precip_hours': daily['precipitation_hours']
+        "date": pd.to_datetime(daily["time"]),
+        "temp_high": daily["temperature_2m_max"],
+        "temp_low": daily["temperature_2m_min"],
+        "precipitation": daily["precipitation_sum"],
+        "snowfall": daily["snowfall_sum"],
+        "precip_hours": daily["precipitation_hours"]
     })
     
-    # Convert date to datetime
-    weather_df['date'] = pd.to_datetime(weather_df['date'])
+    logger.info(f"Successfully fetched {len(weather_df):,} days of weather data")
     
-    print(f"\nFetched {len(weather_df):,} days of weather data")
-    print(f"Date range: {weather_df['date'].min()} to {weather_df['date'].max()}")
+    return weather_df
+
+
+def main() -> None:
+    """Main entry point for weather data fetching."""
+    print_header("NYC WEATHER DATA FETCH")
     
-    # Show summary stats
-    print("\n" + "="*60)
-    print("WEATHER DATA SUMMARY")
-    print("="*60)
-    print(weather_df.describe())
-    
-    # Save to CSV
-    output_path = 'data/nyc_weather_2023_present.csv'
-    weather_df.to_csv(output_path, index=False)
-    print(f"\n✓ Saved weather data to: {output_path}")
-    
-    # Show sample
-    print("\nSample data:")
-    print(weather_df.head(10))
-    
-else:
-    print(f"✗ Failed to fetch data. Status code: {response.status_code}")
-    print(f"Error: {response.text}")
+    try:
+        # Fetch data
+        weather_df = fetch_weather_data()
+        
+        # Display summary
+        logger.info("Weather data summary:")
+        print(weather_df.describe().round(2))
+        
+        # Save to file
+        weather_df.to_csv(WEATHER_DATA_FILE, index=False)
+        logger.info(f"Saved weather data to: {WEATHER_DATA_FILE}")
+        
+        # Show sample
+        print("\nSample data (first 5 rows):")
+        print(weather_df.head())
+        
+        print_header("FETCH COMPLETE")
+        
+    except Exception as e:
+        logger.error(f"Weather fetch failed: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

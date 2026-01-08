@@ -1,21 +1,35 @@
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 venv/
 .env
+*.egg-info/
 
-# Data
+# Data (too large for GitHub)
 data/
 *.csv
 *.xls
 *.xlsx
 
-# Models (Too large for standard GitHub)
+# Models (too large for standard GitHub)
 *.pkl
 models/*.pkl
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
 
 # IDE
 .vscode/
 .idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and outputs
+*.log
+validation_output.txt
