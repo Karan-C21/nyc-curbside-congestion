@@ -36,8 +36,17 @@ This project analyzes **NYC 311 complaint data** to predict where and when deliv
 ### Overview Dashboard
 The main dashboard shows a heatmap of Manhattan with congestion risk levels. Hover over any area to see the neighborhood name, zone, and risk percentage.
 
+![Dashboard Overview](assets/dashboard_overview.png)
+
 ### Multi-Zone Delivery Scheduler
 Select multiple delivery zones by neighborhood (Midtown East, SoHo, etc.) and get optimized delivery times for each location.
+
+![Multi-Zone Scheduler](assets/multi_zone_scheduler.png)
+
+### Analytics Dashboard
+Explore historical congestion patterns by hour and day of week.
+
+![Analytics Charts](assets/analytics_charts.png)
 
 ---
 
