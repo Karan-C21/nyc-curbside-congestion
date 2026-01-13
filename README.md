@@ -33,20 +33,23 @@ This project analyzes **NYC 311 complaint data** to predict where and when deliv
 
 ## 🖼️ Screenshots
 
-### Overview Dashboard
-The main dashboard shows a heatmap of Manhattan with congestion risk levels. Hover over any area to see the neighborhood name, zone, and risk percentage.
+### Dashboard Overview
+![Dashboard Top](assets/dashboard_top.png)
 
-![Dashboard Overview](assets/dashboard_overview.png)
+### Congestion Heatmap
+Interactive heatmap showing real-time congestion risk across Manhattan neighborhoods.
 
-### Multi-Zone Delivery Scheduler
-Select multiple delivery zones by neighborhood (Midtown East, SoHo, etc.) and get optimized delivery times for each location.
+![Dashboard Map](assets/dashboard_map.png)
 
-![Multi-Zone Scheduler](assets/multi_zone_scheduler.png)
+### Predictions & Scheduler
+24-hour forecast with Multi-Zone Delivery Scheduler for optimized route planning.
+
+![Predictions](assets/predictions_full_page.png)
 
 ### Analytics Dashboard
-Explore historical congestion patterns by hour and day of week.
+Historical congestion patterns by hour and day of week.
 
-![Analytics Charts](assets/analytics_charts.png)
+![Analytics](assets/analytics_full_page.png)
 
 ---
 
@@ -166,7 +169,7 @@ The XGBoost classifier uses 16 features including temporal, spatial, weather, an
 
 ## 🔮 Future Improvements
 
-- [ ] Deploy to Streamlit Cloud for public access
+- [x] ~~Deploy to Streamlit Cloud for public access~~ ✅ [Live Demo](https://nyc-curbside-congestion.streamlit.app)
 - [ ] Add historical trend analysis
 - [ ] Incorporate traffic camera data
 - [ ] Add time-series forecasting (LSTM/Prophet)
