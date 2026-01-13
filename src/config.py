@@ -95,8 +95,18 @@ WEATHER_FEATURES: List[str] = [
     "pct_hot"
 ]
 
+HOLIDAY_FEATURES: List[str] = [
+    "is_holiday",
+    "is_holiday_week",
+    "is_month_end",
+    "is_month_start"
+]
+
 # All features used by the enhanced model
-ALL_MODEL_FEATURES: List[str] = TEMPORAL_FEATURES + SPATIAL_FEATURES + WEATHER_FEATURES
+ALL_MODEL_FEATURES: List[str] = TEMPORAL_FEATURES + SPATIAL_FEATURES + WEATHER_FEATURES + HOLIDAY_FEATURES
+
+# Original features (without holidays) for backward compatibility
+LEGACY_MODEL_FEATURES: List[str] = TEMPORAL_FEATURES + SPATIAL_FEATURES + WEATHER_FEATURES
 
 # =============================================================================
 # Weather API Settings

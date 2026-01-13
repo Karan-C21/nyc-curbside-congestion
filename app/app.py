@@ -37,6 +37,7 @@ from src.config import (
 )
 from src.utils import load_model, load_csv, get_risk_color, get_day_name
 from src.api_311 import get_live_stats, fetch_recent_complaints, process_live_complaints, get_current_weather, get_weather_forecast
+from src.holidays import get_special_day_flags, is_holiday, is_holiday_week
 
 # =============================================================================
 # Page Configuration
@@ -243,13 +244,18 @@ def fetch_current_weather():
 # Helper Functions
 # =============================================================================
 
-def calculate_predictions(model, unique_grids, hour, day_of_week, month, temp, precip):
+def calculate_predictions(model, unique_grids, hour, day_of_week, month, temp, precip, target_date=None):
     """Calculate predictions for all grid cells."""
     is_weekend = 1 if day_of_week >= 5 else 0
     is_rush_hour = 1 if hour in RUSH_HOUR_MORNING or hour in RUSH_HOUR_EVENING else 0
     is_rainy = 1 if precip > RAIN_THRESHOLD_INCHES else 0
     is_cold = 1 if temp < COLD_THRESHOLD_F else 0
     is_hot = 1 if temp > HOT_THRESHOLD_F else 0
+    
+    # Get holiday flags
+    if target_date is None:
+        target_date = datetime.now().date()
+    holiday_flags = get_special_day_flags(target_date)
     
     input_data = unique_grids.copy()
     input_data["hour"] = hour
@@ -262,6 +268,12 @@ def calculate_predictions(model, unique_grids, hour, day_of_week, month, temp, p
     input_data["pct_rainy"] = is_rainy
     input_data["pct_cold"] = is_cold
     input_data["pct_hot"] = is_hot
+    
+    # Add holiday features
+    input_data["is_holiday"] = holiday_flags["is_holiday"]
+    input_data["is_holiday_week"] = holiday_flags["is_holiday_week"]
+    input_data["is_month_end"] = holiday_flags["is_month_end"]
+    input_data["is_month_start"] = holiday_flags["is_month_start"]
     
     probs = model.predict_proba(input_data[ALL_MODEL_FEATURES])[:, 1]
     input_data["congestion_prob"] = probs
@@ -318,47 +330,117 @@ def generate_insight(risk_level: str, hour: int, day_of_week: int, temp: float, 
 
 
 def create_map_layer(input_data: pd.DataFrame) -> pdk.Deck:
-    """Create the PyDeck map visualization with clear 2D view."""
+    """Create a smooth heatmap visualization without visible zone boundaries."""
     
-    # Main congestion layer - flat circles for clarity
-    scatter_layer = pdk.Layer(
-        "ScatterplotLayer",
-        input_data,
+    # Function to get neighborhood name from coordinates
+    def get_neighborhood(lat, lon):
+        if lat >= 40.80:
+            return "Harlem"
+        elif lat >= 40.77:
+            return "Upper East Side" if lon >= -73.97 else "Upper West Side"
+        elif lat >= 40.75:
+            return "Midtown East" if lon >= -73.98 else "Midtown West"
+        elif lat >= 40.73:
+            return "Gramercy" if lon >= -73.99 else "Chelsea"
+        elif lat >= 40.72:
+            return "East Village" if lon >= -73.99 else "Greenwich Village"
+        elif lat >= 40.71:
+            return "Lower East Side" if lon >= -73.99 else "SoHo/Tribeca"
+        else:
+            return "Financial District"
+    
+    # Prepare data for heatmap
+    map_data = input_data.copy()
+    map_data['risk_pct'] = (map_data['congestion_prob'] * 100).round(1)
+    map_data['risk_display'] = map_data['risk_pct'].apply(lambda x: f"{x:.1f}%")
+    map_data = map_data.reset_index(drop=True)
+    map_data['zone_num'] = map_data.index + 1
+    
+    # Add neighborhood names
+    map_data['neighborhood'] = map_data.apply(
+        lambda r: get_neighborhood(r['grid_lat'], r['grid_lon']), 
+        axis=1
+    )
+    
+    # Weight for heatmap intensity (scale to reasonable range)
+    map_data['weight'] = map_data['congestion_prob'] * 100
+    
+    def get_risk_text(prob):
+        if prob < 0.25:
+            return "Low Risk"
+        elif prob < 0.50:
+            return "Moderate Risk"
+        else:
+            return "High Risk"
+    
+    map_data['risk_level'] = map_data['congestion_prob'].apply(get_risk_text)
+    
+    # Smooth heatmap layer - continuous gradient (balanced brightness)
+    heatmap_layer = pdk.Layer(
+        "HeatmapLayer",
+        map_data,
         get_position=["grid_lon", "grid_lat"],
-        get_fill_color="color",
-        get_radius=350,
+        get_weight="weight",
+        aggregation="SUM",
+        radius_pixels=55,
+        intensity=0.8,  # Balanced brightness
+        threshold=0.03,
+        color_range=[
+            [0, 120, 0, 140],       # Green (low)
+            [100, 200, 0, 150],     # Yellow-green
+            [200, 220, 0, 160],     # Yellow
+            [240, 180, 0, 165],     # Orange
+            [230, 100, 0, 175],     # Red-orange
+            [200, 30, 30, 185],     # Red (high)
+        ],
+    )
+    
+    # Small dots for hover interaction (almost invisible but pickable)
+    interaction_layer = pdk.Layer(
+        "ScatterplotLayer",
+        map_data,
+        get_position=["grid_lon", "grid_lat"],
+        get_fill_color=[255, 255, 255, 0],  # Invisible
+        get_radius=300,
         pickable=True,
-        opacity=0.8,
-        stroked=True,
-        get_line_color=[255, 255, 255, 80],
-        line_width_min_pixels=1,
+        opacity=0,
     )
     
     view_state = pdk.ViewState(
         latitude=MAP_VIEW["latitude"],
         longitude=MAP_VIEW["longitude"],
-        zoom=11.8,
-        pitch=0,  # Flat 2D view for clarity
+        zoom=11.5,
+        pitch=0,
         bearing=0
     )
     
     return pdk.Deck(
-        layers=[scatter_layer],
+        layers=[heatmap_layer, interaction_layer],
         initial_view_state=view_state,
-        map_style=pdk.map_styles.CARTO_DARK,  # Free dark map with streets visible
+        map_style=pdk.map_styles.CARTO_DARK,
         tooltip={
             "html": """
-                <div style='padding: 8px;'>
-                    <b style='font-size: 14px;'>Zone {grid_id}</b><br/>
-                    <span style='color: #a0aec0;'>Congestion Risk:</span><br/>
-                    <span style='font-size: 20px; font-weight: bold;'>{congestion_prob:.1%}</span>
+                <div style='padding: 14px 18px; min-width: 160px;'>
+                    <div style='font-size: 15px; font-weight: 600; margin-bottom: 6px;'>
+                        {neighborhood}
+                    </div>
+                    <div style='font-size: 11px; color: #94a3b8; margin-bottom: 8px; letter-spacing: 0.5px;'>
+                        ZONE {zone_num}
+                    </div>
+                    <div style='font-size: 32px; font-weight: 700; margin: 8px 0;'>
+                        {risk_display}
+                    </div>
+                    <div style='font-size: 12px; color: #64748b;'>
+                        {risk_level}
+                    </div>
                 </div>
             """,
             "style": {
-                "backgroundColor": "#1a1a2e",
+                "backgroundColor": "#0f172a",
                 "color": "white",
-                "borderRadius": "8px",
-                "border": "1px solid rgba(255,255,255,0.1)"
+                "borderRadius": "12px",
+                "border": "1px solid rgba(255,255,255,0.1)",
+                "boxShadow": "0 8px 32px rgba(0,0,0,0.5)"
             }
         }
     )
@@ -383,8 +465,37 @@ def render_overview_tab(model, unique_grids):
         selected_hour = st.slider("🕐 Hour", 0, 23, datetime.now().hour, label_visibility="collapsed")
         st.caption(f"Time: {selected_hour:02d}:00")
     
+    # Check for holidays
+    is_hol, holiday_name = is_holiday(selected_date)
+    is_hol_week = is_holiday_week(selected_date)
+    
+    if is_hol:
+        st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; 
+                    background: linear-gradient(90deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%);
+                    border: 1px solid rgba(239, 68, 68, 0.4); 
+                    border-radius: 8px; margin: 10px 0;">
+            <span style="font-size: 1.5rem;">🎉</span>
+            <div>
+                <span style="color: #ef4444; font-weight: 600;">{holiday_name}</span>
+                <span style="color: #a0aec0; margin-left: 8px;">Expect altered delivery patterns</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    elif is_hol_week:
+        st.markdown("""
+        <div style="display: flex; align-items: center; gap: 10px; padding: 10px 16px; 
+                    background: rgba(251, 191, 36, 0.1);
+                    border: 1px solid rgba(251, 191, 36, 0.3); 
+                    border-radius: 6px; margin: 10px 0;">
+            <span style="font-size: 1.2rem;">📅</span>
+            <span style="color: #fbbf24;">Holiday week — delivery volumes may be elevated</span>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # Check if date is within forecast window (pass the hour too!)
     forecast = get_weather_forecast(selected_date, selected_hour)
+
     
     if forecast["in_window"]:
         # Within 7-day window - use forecast, no manual controls
@@ -873,6 +984,245 @@ def render_predictions_tab(model, unique_grids):
         st.success(f"✅ **Best time to deliver:** {best_hour['hour_label']} ({best_hour['risk']:.1f}% risk)")
     with b2:
         st.error(f"⚠️ **Avoid deliveries at:** {worst_hour['hour_label']} ({worst_hour['risk']:.1f}% risk)")
+
+    # =========================================================================
+    # Multi-Zone Delivery Scheduler
+    # =========================================================================
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("### 🚛 Multi-Zone Delivery Scheduler")
+    st.markdown("*Plan deliveries across multiple zones with optimized timing*")
+    
+    # Function to get neighborhood name from coordinates
+    def get_neighborhood(lat, lon):
+        """Map lat/lon to approximate Manhattan neighborhood."""
+        if lat >= 40.80:
+            return "Harlem"
+        elif lat >= 40.77:
+            if lon >= -73.97:
+                return "Upper East Side"
+            else:
+                return "Upper West Side"
+        elif lat >= 40.75:
+            if lon >= -73.98:
+                return "Midtown East"
+            else:
+                return "Midtown West"
+        elif lat >= 40.73:
+            if lon >= -73.99:
+                return "Gramercy/Murray Hill"
+            else:
+                return "Chelsea"
+        elif lat >= 40.72:
+            if lon >= -73.99:
+                return "East Village"
+            else:
+                return "Greenwich Village"
+        elif lat >= 40.71:
+            if lon >= -73.99:
+                return "Lower East Side"
+            else:
+                return "SoHo/Tribeca"
+        else:
+            return "Financial District"
+    
+    # Get zone options with neighborhood names
+    zone_data = unique_grids.copy().reset_index(drop=True)
+    zone_data['zone_num'] = zone_data.index + 1
+    zone_data['neighborhood'] = zone_data.apply(
+        lambda r: get_neighborhood(r['grid_lat'], r['grid_lon']), 
+        axis=1
+    )
+    zone_data['zone_label'] = zone_data.apply(
+        lambda r: f"{r['neighborhood']} (Zone {r['zone_num']})", 
+        axis=1
+    )
+    zone_options = dict(zip(zone_data['zone_label'], zone_data['grid_id']))
+    zone_num_map = dict(zip(zone_data['grid_id'], zone_data['zone_num']))
+    zone_neighborhood_map = dict(zip(zone_data['grid_id'], zone_data['neighborhood']))
+    
+    # Input section
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    input_col1, input_col2 = st.columns([3, 1])
+    
+    with input_col1:
+        selected_zone_labels = st.multiselect(
+            "📍 Select Delivery Zones",
+            options=list(zone_options.keys()),
+            default=list(zone_options.keys())[:3] if len(zone_options) >= 3 else list(zone_options.keys()),
+            help="Choose the zones where you need to make deliveries"
+        )
+    
+    with input_col2:
+        schedule_date = st.date_input(
+            "📅 Delivery Date",
+            value=datetime.now().date(),
+            min_value=datetime.now().date(),
+            max_value=datetime.now().date() + timedelta(days=7)
+        )
+    
+    # Convert labels back to zone IDs
+    selected_zone_ids = [zone_options[label] for label in selected_zone_labels]
+    
+    if st.button("🔍 Optimize Delivery Schedule", type="primary", use_container_width=True, key="scheduler_btn"):
+        if not selected_zone_ids:
+            st.warning("⚠️ Please select at least one zone to optimize.")
+        else:
+            with st.spinner("🔄 Analyzing congestion patterns and optimizing schedule..."):
+                # Optimization logic
+                schedule_results = []
+                
+                # Delivery window: 7 AM to 6 PM (business hours only)
+                delivery_hours = list(range(7, 19))
+                
+                for zone_id in selected_zone_ids:
+                    zone_grid = unique_grids[unique_grids['grid_id'] == zone_id]
+                    
+                    if zone_grid.empty:
+                        continue
+                    
+                    hourly_risks = []
+                    
+                    for hour in delivery_hours:
+                        # Get weather forecast for this hour
+                        weather = get_weather_forecast(schedule_date, hour)
+                        temp = weather.get("temperature", 65) or 65
+                        precip = weather.get("precipitation", 0.0) or 0.0
+                        
+                        # Calculate prediction
+                        _, prob = calculate_predictions(
+                            model, zone_grid,
+                            hour, schedule_date.weekday(), schedule_date.month,
+                            temp, precip
+                        )
+                        
+                        risk_pct = prob[0] * 100 if len(prob) > 0 else 50
+                        hourly_risks.append({
+                            "hour": hour,
+                            "risk": risk_pct,
+                            "temp": temp
+                        })
+                    
+                    # Find optimal hour (lowest risk)
+                    if hourly_risks:
+                        best = min(hourly_risks, key=lambda x: x["risk"])
+                        worst = max(hourly_risks, key=lambda x: x["risk"])
+                        
+                        # Format time nicely
+                        best_time = f"{best['hour']}:00 AM" if best['hour'] < 12 else f"{best['hour']-12 or 12}:00 PM"
+                        
+                        schedule_results.append({
+                            "zone_id": zone_id,
+                            "zone_label": f"{zone_neighborhood_map.get(zone_id, 'Zone')} #{zone_num_map.get(zone_id, '')}",
+                            "optimal_hour": best["hour"],
+                            "optimal_time": best_time,
+                            "optimal_risk": best["risk"],
+                            "worst_risk": worst["risk"],
+                            "improvement": worst["risk"] - best["risk"],
+                            "temp": best["temp"]
+                        })
+                
+                if schedule_results:
+                    # Sort by optimal hour for a logical schedule
+                    schedule_results.sort(key=lambda x: x["optimal_hour"])
+                    
+                    # Calculate totals
+                    total_optimal_risk = sum(r["optimal_risk"] for r in schedule_results)
+                    total_worst_risk = sum(r["worst_risk"] for r in schedule_results)
+                    avg_improvement = (total_worst_risk - total_optimal_risk) / len(schedule_results)
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    # Summary metrics
+                    st.markdown("#### 📊 Optimization Summary")
+                    
+                    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                    
+                    with metric_col1:
+                        st.metric(
+                            "Zones Scheduled",
+                            len(schedule_results),
+                            help="Number of delivery zones in the schedule"
+                        )
+                    
+                    with metric_col2:
+                        st.metric(
+                            "Avg Risk (Optimized)",
+                            f"{total_optimal_risk / len(schedule_results):.1f}%",
+                            delta=f"-{avg_improvement:.1f}% vs worst",
+                            delta_color="inverse"
+                        )
+                    
+                    with metric_col3:
+                        first_delivery = min(r["optimal_hour"] for r in schedule_results)
+                        first_time = f"{first_delivery}:00 AM" if first_delivery < 12 else f"{first_delivery-12 or 12}:00 PM"
+                        st.metric("First Delivery", first_time)
+                    
+                    with metric_col4:
+                        last_delivery = max(r["optimal_hour"] for r in schedule_results)
+                        last_time = f"{last_delivery}:00 AM" if last_delivery < 12 else f"{last_delivery-12 or 12}:00 PM"
+                        st.metric("Last Delivery", last_time)
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    # Detailed Schedule Table
+                    st.markdown("#### 📋 Optimized Delivery Schedule")
+                    
+                    # Create display dataframe
+                    display_data = []
+                    for i, r in enumerate(schedule_results, 1):
+                        risk_level = "🟢 Low" if r["optimal_risk"] < 30 else ("🟡 Medium" if r["optimal_risk"] < 50 else "🔴 High")
+                        display_data.append({
+                            "Order": i,
+                            "Zone": r["zone_label"],
+                            "Optimal Time": r["optimal_time"],
+                            "Risk Level": risk_level,
+                            "Risk %": f"{r['optimal_risk']:.1f}%",
+                            "Savings": f"↓ {r['improvement']:.1f}%"
+                        })
+                    
+                    display_df = pd.DataFrame(display_data)
+                    
+                    # Style the table
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Order": st.column_config.NumberColumn("📍", width="small"),
+                            "Zone": st.column_config.TextColumn("Zone", width="medium"),
+                            "Optimal Time": st.column_config.TextColumn("⏰ Best Time", width="medium"),
+                            "Risk Level": st.column_config.TextColumn("Risk", width="medium"),
+                            "Risk %": st.column_config.TextColumn("Score", width="small"),
+                            "Savings": st.column_config.TextColumn("vs Worst", width="small")
+                        }
+                    )
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    # Key recommendations
+                    st.markdown("#### 💡 Recommendations")
+                    
+                    early_zones = [r for r in schedule_results if r["optimal_hour"] < 10]
+                    midday_zones = [r for r in schedule_results if 10 <= r["optimal_hour"] < 14]
+                    afternoon_zones = [r for r in schedule_results if r["optimal_hour"] >= 14]
+                    
+                    rec_col1, rec_col2 = st.columns(2)
+                    
+                    with rec_col1:
+                        if early_zones:
+                            st.info(f"🌅 **Morning Priority**: {len(early_zones)} zone(s) should be delivered before 10 AM")
+                        if afternoon_zones:
+                            st.info(f"🌆 **Afternoon Slots**: {len(afternoon_zones)} zone(s) are best after 2 PM")
+                    
+                    with rec_col2:
+                        high_risk_zones = [r for r in schedule_results if r["optimal_risk"] >= 50]
+                        if high_risk_zones:
+                            st.warning(f"⚠️ **Caution**: {len(high_risk_zones)} zone(s) still have elevated risk even at optimal times")
+                        else:
+                            st.success("✅ All zones can be delivered at low-to-moderate risk times!")
 
 
 # =============================================================================

@@ -1,12 +1,12 @@
 <p align="center">
   <h1 align="center">🚚 NYC Curbside Congestion Predictor</h1>
   <p align="center">
-    <strong>Predicting delivery truck congestion patterns across Manhattan using machine learning</strong>
+    <strong>Data-driven prediction of delivery truck congestion patterns across Manhattan</strong>
   </p>
   <p align="center">
     <img src="https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Streamlit-1.28+-FF4B4B?logo=streamlit&logoColor=white" alt="Streamlit">
-    <img src="https://img.shields.io/badge/scikit--learn-1.3+-F7931E?logo=scikit-learn&logoColor=white" alt="scikit-learn">
+    <img src="https://img.shields.io/badge/XGBoost-1.7+-orange?logo=xgboost&logoColor=white" alt="XGBoost">
     <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
   </p>
 </p>
@@ -17,12 +17,24 @@
 
 This project analyzes **NYC 311 complaint data** to predict where and when delivery truck congestion is most likely to occur across Manhattan. The interactive dashboard allows logistics planners, city officials, and researchers to explore congestion risk under different conditions.
 
-### Key Features
+### ✨ Key Features
 
-- 🗺️ **Interactive Map** — Visualize congestion risk across Manhattan grid zones
-- 🌦️ **Weather Integration** — Factor in temperature and precipitation impacts
-- ⏰ **Temporal Analysis** — Understand rush hour and weekend patterns
-- 🤖 **ML Predictions** — Random Forest model with balanced class handling
+- 🗺️ **Interactive Heatmap** — Visualize congestion risk across Manhattan with smooth gradient visualization
+- 🌦️ **Live Weather Integration** — Automatically fetches current and 7-day forecast weather data
+- 📅 **Holiday Awareness** — Factors in US holidays and special days for improved predictions
+- 🚛 **Multi-Zone Scheduler** — Plan deliveries across multiple neighborhoods with optimized timing
+- ⏰ **24-Hour Forecasting** — See congestion risk for the entire day ahead
+- 📊 **Real-Time 311 Data** — Pulls live complaint data from NYC Open Data API
+
+---
+
+## 🖼️ Screenshots
+
+### Overview Dashboard
+The main dashboard shows a heatmap of Manhattan with congestion risk levels. Hover over any area to see the neighborhood name, zone, and risk percentage.
+
+### Multi-Zone Delivery Scheduler
+Select multiple delivery zones by neighborhood (Midtown East, SoHo, etc.) and get optimized delivery times for each location.
 
 ---
 
@@ -32,30 +44,25 @@ This project analyzes **NYC 311 complaint data** to predict where and when deliv
 nyc-curbside-congestion/
 ├── app/
 │   └── app.py                 # Streamlit dashboard
-├── data/                      # Data files (gitignored)
-│   ├── 311_truck_broad_filtered.csv
+├── data/
+│   ├── modeling_dataset.csv   # Aggregated training data
 │   ├── complaints_with_features.csv
-│   ├── modeling_dataset.csv
 │   └── nyc_weather_2023_present.csv
-├── models/                    # Trained models (gitignored)
-│   └── random_forest_weather_enhanced.pkl
+├── models/
+│   └── xgboost_model.pkl      # Trained XGBoost classifier
 ├── notebooks/
-│   ├── 01_data_loading_and_exploration.ipynb
-│   ├── 02_fixed_exploration.ipynb
-│   ├── 03_feature_engineering.ipynb
-│   ├── 04_spatial_and_aggregation.ipynb
-│   ├── 05_modeling.ipynb
-│   └── 06_external_data_integration.ipynb
+│   ├── 01_EDA_and_Preprocessing.ipynb
+│   └── 02_Modeling_and_Evaluation.ipynb
 ├── scripts/
-│   ├── fetch_weather_data.py  # Weather API integration
-│   ├── validate_features.py   # Feature engineering validation
-│   ├── retrain_spatial.py     # Model training script
-│   ├── fix_class_imbalance.py # Notebook patcher utility
-│   └── check_step5.py         # Quick model validation
+│   ├── train_xgboost.py       # Model training script
+│   ├── train_enhanced_model.py # Enhanced model with holidays
+│   └── fetch_weather_data.py  # Weather API integration
 ├── src/
 │   ├── __init__.py
 │   ├── config.py              # Centralized configuration
-│   └── utils.py               # Shared utility functions
+│   ├── utils.py               # Shared utility functions
+│   ├── api_311.py             # NYC 311 API client
+│   └── holidays.py            # Holiday detection module
 ├── requirements.txt
 ├── LICENSE
 └── README.md
@@ -99,38 +106,28 @@ nyc-curbside-congestion/
    streamlit run app/app.py
    ```
 
----
-
-## 📊 Data Pipeline
-
-The project follows a structured notebook pipeline:
-
-| Step | Notebook | Description |
-|------|----------|-------------|
-| 1 | `01_data_loading_and_exploration` | Load and explore raw 311 complaint data |
-| 2 | `02_fixed_exploration` | Clean and filter truck-related complaints |
-| 3 | `03_feature_engineering` | Extract temporal features (hour, day, rush hour) |
-| 4 | `04_spatial_and_aggregation` | Create Manhattan grid zones and aggregate |
-| 5 | `05_modeling` | Train baseline ML models |
-| 6 | `06_external_data_integration` | Add weather data and train enhanced model |
+The dashboard will open in your browser at `http://localhost:8501`
 
 ---
 
 ## 🧠 Model Performance
 
-The enhanced Random Forest model includes:
-- **Temporal features**: hour, day of week, weekend flag, rush hour flag, month
-- **Spatial features**: grid latitude/longitude
-- **Weather features**: temperature, precipitation, weather condition flags
+The XGBoost classifier uses 16 features including temporal, spatial, weather, and holiday features:
+
+### Features Used
+- **Temporal**: hour, day_of_week, is_weekend, is_rush_hour, month
+- **Spatial**: grid_lat, grid_lon
+- **Weather**: avg_temp, avg_precip, pct_rainy, pct_cold, pct_hot
+- **Holiday**: is_holiday, is_holiday_week, is_month_end, is_month_start
+
+### Performance Metrics
 
 | Metric | Score |
 |--------|-------|
-| Accuracy | ~0.75 |
-| Precision | ~0.65 |
-| Recall | ~0.70 |
-| F1 Score | ~0.67 |
-
-*Note: Scores may vary based on data updates*
+| **Accuracy** | 84.3% |
+| **Precision** | ~62% |
+| **Recall** | ~89% |
+| **F1 Score** | ~73% |
 
 ---
 
@@ -139,28 +136,30 @@ The enhanced Random Forest model includes:
 | Category | Technologies |
 |----------|-------------|
 | **Language** | Python 3.9+ |
-| **ML Framework** | scikit-learn |
+| **ML Framework** | XGBoost, scikit-learn |
 | **Dashboard** | Streamlit, PyDeck |
 | **Data Processing** | Pandas, NumPy |
-| **Visualization** | Matplotlib, Seaborn, Folium |
-| **External Data** | Open-Meteo Weather API |
+| **Visualization** | Altair, Matplotlib |
+| **APIs** | NYC Open Data, Open-Meteo Weather |
 
 ---
 
 ## 📁 Data Sources
 
 - **NYC 311 Complaints**: [NYC Open Data Portal](https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9)
-- **Weather Data**: [Open-Meteo Historical API](https://open-meteo.com/)
+- **Weather Data**: [Open-Meteo API](https://open-meteo.com/)
+- **Holiday Data**: Built-in US federal holiday detection
 
 ---
 
 ## 🔮 Future Improvements
 
-- [ ] Add real-time 311 data streaming
+- [ ] Deploy to Streamlit Cloud for public access
+- [ ] Add historical trend analysis
 - [ ] Incorporate traffic camera data
-- [ ] Deploy to Streamlit Cloud
-- [ ] Add time-series forecasting
+- [ ] Add time-series forecasting (LSTM/Prophet)
 - [ ] Expand to all NYC boroughs
+- [ ] Add route optimization between zones
 
 ---
 
