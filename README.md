@@ -4,6 +4,9 @@
     <strong>Data-driven prediction of delivery truck congestion patterns across Manhattan</strong>
   </p>
   <p align="center">
+    <a href="https://nyc-curbside-congestion.streamlit.app"><img src="https://img.shields.io/badge/🚀_Live_Demo-Click_Here-FF4B4B?style=for-the-badge" alt="Live Demo"></a>
+  </p>
+  <p align="center">
     <img src="https://img.shields.io/badge/Python-3.9+-blue?logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Streamlit-1.28+-FF4B4B?logo=streamlit&logoColor=white" alt="Streamlit">
     <img src="https://img.shields.io/badge/XGBoost-1.7+-orange?logo=xgboost&logoColor=white" alt="XGBoost">
