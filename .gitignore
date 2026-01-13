@@ -6,15 +6,20 @@ venv/
 .env
 *.egg-info/
 
-# Data (too large for GitHub)
-data/
-*.csv
-*.xls
-*.xlsx
+# Data (large raw files - exclude)
+data/311_manhattan*.csv
+data/311_truck*.csv
+data/*_clusters.csv
+data/*_spatial*.csv
+data/*.html
 
-# Models (too large for standard GitHub)
-*.pkl
-models/*.pkl
+# Keep essential data for deployment
+!data/modeling_dataset.csv
+!data/complaints_with_features.csv
+!data/nyc_weather_2023_present.csv
+
+# Models - keep the trained model
+!models/xgboost_model.pkl
 
 # Jupyter
 .ipynb_checkpoints/
