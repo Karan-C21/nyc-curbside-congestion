@@ -204,31 +204,25 @@ def get_current_weather() -> Dict[str, Any]:
     Returns:
         Dictionary with current temperature and precipitation.
     """
-    url = "https://api.open-meteo.com/v1/forecast"
-    
-    params = {
-        "latitude": NYC_LATITUDE,
-        "longitude": NYC_LONGITUDE,
-        "current": ["temperature_2m", "precipitation"],
-        "temperature_unit": "fahrenheit",
-        "precipitation_unit": "inch",
-        "timezone": "America/New_York"
-    }
-    
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        data = fetch_raw_weather_data()
         
-        current = data.get("current", {})
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        precip = hourly.get("precipitation", [])
         
-        return {
-            "temperature": current.get("temperature_2m", 65),
-            "precipitation": current.get("precipitation", 0.0),
-            "is_live": True,
-            "last_update": datetime.now(),
-            "error": None
-        }
+        if times:
+            return {
+                "temperature": round(temps[0], 1),
+                "precipitation": round(precip[0], 2),
+                "is_live": True,
+                "last_update": datetime.now(),
+                "error": None
+            }
+        else:
+            raise ValueError("No timeseries data found")
+            
     except Exception as e:
         logger.warning(f"Failed to fetch weather: {e}")
         return {
@@ -256,21 +250,52 @@ def fetch_raw_weather_data() -> Dict[str, Any]:
     if _WEATHER_CACHE["error"] is not None and (current_time - _WEATHER_CACHE["error_timestamp"] < 60):
         raise _WEATHER_CACHE["error"]
         
-    url = "https://api.open-meteo.com/v1/forecast"
+    url = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
     params = {
-        "latitude": NYC_LATITUDE,
-        "longitude": NYC_LONGITUDE,
-        "hourly": ["temperature_2m", "precipitation"],
-        "temperature_unit": "fahrenheit",
-        "precipitation_unit": "inch",
-        "timezone": "America/New_York",
-        "forecast_days": 8
+        "lat": NYC_LATITUDE,
+        "lon": NYC_LONGITUDE
+    }
+    headers = {
+        "User-Agent": "nyc-curbside-congestion/1.0 github.com/Karan-C21/nyc-curbside-congestion"
     }
     
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
-        data = response.json()
+        raw_data = response.json()
+        
+        times = []
+        temps = []
+        precip = []
+        
+        for ts in raw_data.get("properties", {}).get("timeseries", []):
+            time_str = ts.get("time", "")
+            if not time_str: continue
+            
+            # Convert UTC to local NY time
+            local_time = pd.to_datetime(time_str).tz_convert("America/New_York").strftime("%Y-%m-%dT%H:00")
+            times.append(local_time)
+            
+            # Temperature (Celsius to Fahrenheit)
+            temp_c = ts["data"]["instant"]["details"].get("air_temperature", 20.0)
+            temps.append((temp_c * 9/5) + 32)
+            
+            # Precipitation (mm to inches)
+            precip_mm = 0.0
+            if "next_1_hours" in ts["data"]:
+                precip_mm = ts["data"]["next_1_hours"]["details"].get("precipitation_amount", 0.0)
+            elif "next_6_hours" in ts["data"]:
+                precip_mm = ts["data"]["next_6_hours"]["details"].get("precipitation_amount", 0.0) / 6.0
+                
+            precip.append(precip_mm / 25.4)
+            
+        data = {
+            "hourly": {
+                "time": times,
+                "temperature_2m": temps,
+                "precipitation": precip
+            }
+        }
         
         _WEATHER_CACHE["data"] = data
         _WEATHER_CACHE["timestamp"] = current_time
