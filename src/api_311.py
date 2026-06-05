@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
+import time
 
 import pandas as pd
 import requests
@@ -240,6 +241,46 @@ def get_current_weather() -> Dict[str, Any]:
 
 
 
+_WEATHER_CACHE = {"data": None, "timestamp": 0, "error": None, "error_timestamp": 0}
+
+def fetch_raw_weather_data() -> Dict[str, Any]:
+    """Fetch raw 8-day forecast data with a simple 1-hour memory cache."""
+    global _WEATHER_CACHE
+    current_time = time.time()
+    
+    # Return cached data if less than 1 hour old
+    if _WEATHER_CACHE["data"] is not None and (current_time - _WEATHER_CACHE["timestamp"] < 3600):
+        return _WEATHER_CACHE["data"]
+        
+    # If we hit an error (like 429), back off for 1 minute before retrying
+    if _WEATHER_CACHE["error"] is not None and (current_time - _WEATHER_CACHE["error_timestamp"] < 60):
+        raise _WEATHER_CACHE["error"]
+        
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": NYC_LATITUDE,
+        "longitude": NYC_LONGITUDE,
+        "hourly": ["temperature_2m", "precipitation"],
+        "temperature_unit": "fahrenheit",
+        "precipitation_unit": "inch",
+        "timezone": "America/New_York",
+        "forecast_days": 8
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        _WEATHER_CACHE["data"] = data
+        _WEATHER_CACHE["timestamp"] = current_time
+        _WEATHER_CACHE["error"] = None
+        return data
+    except Exception as e:
+        _WEATHER_CACHE["error"] = e
+        _WEATHER_CACHE["error_timestamp"] = current_time
+        raise
+
 def get_weather_forecast(target_date, target_hour: int = 12) -> Dict[str, Any]:
     """
     Fetch weather forecast for a specific date and hour (up to 7 days ahead).
@@ -256,9 +297,6 @@ def get_weather_forecast(target_date, target_hour: int = 12) -> Dict[str, Any]:
     target = target_date.date() if isinstance(target_date, datetime) else target_date
     days_ahead = (target - today).days
     
-    with open("weather_debug.log", "a") as f:
-        f.write(f"target_date={target_date!r}, target={target!r}, today={today!r}, days_ahead={days_ahead}\n")
-
     # Check if within forecast window
     if days_ahead < 0 or days_ahead > 7:
         return {
@@ -269,23 +307,8 @@ def get_weather_forecast(target_date, target_hour: int = 12) -> Dict[str, Any]:
             "error": "Date outside 7-day forecast window"
         }
     
-    # Fetch hourly forecast
-    url = "https://api.open-meteo.com/v1/forecast"
-    
-    params = {
-        "latitude": NYC_LATITUDE,
-        "longitude": NYC_LONGITUDE,
-        "hourly": ["temperature_2m", "precipitation"],
-        "temperature_unit": "fahrenheit",
-        "precipitation_unit": "inch",
-        "timezone": "America/New_York",
-        "forecast_days": 8
-    }
-    
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        data = fetch_raw_weather_data()
         
         hourly = data.get("hourly", {})
         times = hourly.get("time", [])
