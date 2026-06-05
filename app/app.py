@@ -240,6 +240,12 @@ def fetch_current_weather():
     return get_current_weather()
 
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def fetch_weather_forecast(target_date, target_hour):
+    """Fetch weather forecast with caching to prevent API rate limits."""
+    return get_weather_forecast(target_date, target_hour)
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -494,7 +500,7 @@ def render_overview_tab(model, unique_grids):
         """, unsafe_allow_html=True)
     
     # Check if date is within forecast window (pass the hour too!)
-    forecast = get_weather_forecast(selected_date, selected_hour)
+    forecast = fetch_weather_forecast(selected_date, selected_hour)
 
     
     if forecast["in_window"]:
@@ -520,12 +526,18 @@ def render_overview_tab(model, unique_grids):
         </div>
         """, unsafe_allow_html=True)
     else:
-        # Outside 7-day window - show manual controls
-        st.markdown("""
+        # Outside 7-day window or API error - show manual controls
+        error_msg = forecast.get("error", "")
+        if error_msg and "Date outside" not in error_msg:
+            display_msg = f"⚠️ Weather forecast unavailable ({error_msg})."
+        else:
+            display_msg = "⚠️ This date is outside the 7-day forecast window."
+            
+        st.markdown(f"""
         <div style="display: flex; align-items: center; gap: 10px; padding: 10px 16px; 
                     background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); 
                     border-radius: 6px; margin: 10px 0;">
-            <span style="color: #f59e0b;">⚠️ This date is outside the 7-day forecast window.</span>
+            <span style="color: #f59e0b;">{display_msg}</span>
             <span style="color: #a0aec0;">Please enter weather manually below:</span>
         </div>
         """, unsafe_allow_html=True)
@@ -1087,7 +1099,7 @@ def render_predictions_tab(model, unique_grids):
                     
                     for hour in delivery_hours:
                         # Get weather forecast for this hour
-                        weather = get_weather_forecast(schedule_date, hour)
+                        weather = fetch_weather_forecast(schedule_date, hour)
                         temp = weather.get("temperature", 65) or 65
                         precip = weather.get("precipitation", 0.0) or 0.0
                         

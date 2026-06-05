@@ -256,6 +256,9 @@ def get_weather_forecast(target_date, target_hour: int = 12) -> Dict[str, Any]:
     target = target_date.date() if isinstance(target_date, datetime) else target_date
     days_ahead = (target - today).days
     
+    with open("weather_debug.log", "a") as f:
+        f.write(f"target_date={target_date!r}, target={target!r}, today={today!r}, days_ahead={days_ahead}\n")
+
     # Check if within forecast window
     if days_ahead < 0 or days_ahead > 7:
         return {
